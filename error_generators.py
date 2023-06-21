@@ -283,7 +283,7 @@ class ErrorGen():
     def mat(self):
         mat = np.zeros((4 ** self.num_qubits, 4 ** self.num_qubits), dtype='O')
         for x in self.vec:
-            mat += x * self.feature_map[x]
+            mat += x * self.feature_of_param(x)
         return sp.Matrix(mat)
 
     @property
@@ -297,12 +297,121 @@ class ErrorGen():
     def feature_of_param(self, param):
         return egenlbl_to_mat(self.label_map[param], self.num_qubits)
 
+    def dual_of_param(self, param):
+        return egenlbl_to_dual(self.label_map[param], self.num_qubits)
+
     def extract_rates(self):
         rates = dict()
         gen = self.mat
         for lbl in tqdm(self.labels):
             dgen = egenlbl_to_dual(lbl, self.num_qubits)
             rates[lbl] = np.trace(dgen.conj().T @ gen)
+        return rates
+
+class EEBasis():
+    """
+    Elementary error basis
+
+    Parameters:
+        -features: pauli transfer representations for different error processes
+        -rates: sympy vector of rates
+    """
+
+    def __init__(self, num_qubits, gate_label=('G', 0), parameterization='HSCA'):
+        """
+        setup the feature dictionary with keys that are sympy variables
+        """
+        self.num_qubits = num_qubits
+        self.label_map = dict()  # maps params to corresponding pygsti labels
+        self.labels = LindbladErrorgen.from_error_generator(4 ** num_qubits).coefficient_labels()
+        self.params = []
+        for lbl in self.labels:
+            if len(lbl.basis_element_labels) > 1:
+                pstr1 = str()
+                pstr2 = str()
+                lbl1 = lbl.basis_element_labels[0]
+                lbl2 = lbl.basis_element_labels[1]
+                if len(lbl1) < num_qubits:
+                    flg = 0
+                    for i in range(num_qubits):
+                        if i in lbl.support:
+                            pstr1 += lbl1[flg]
+                            flg += 1
+                        else:
+                            pstr1 += 'I'
+                else:
+                    pstr1 = lbl.basis_element_labels[0]
+                if len(lbl2) < num_qubits:
+                    flg = 0
+                    for i in range(num_qubits):
+                        if i in lbl.support:
+                            pstr2 += lbl2[flg]
+                            flg += 1
+                        else:
+                            pstr2 += 'I'
+                else:
+                    pstr2 = lbl.basis_element_labels[1]
+                pstr = pstr1 + 'x' + pstr2
+            else:
+                pstr = str()
+                flg = 0
+                for idx in range(num_qubits):
+                    if idx in lbl.support:
+                        pstr += lbl.basis_element_labels[0][flg]
+                        flg += 1
+                    else:
+                        pstr += 'I'
+            if len(gate_label) > 1:
+                gstr = str(gate_label[0]) + 'q' + str(gate_label[1])
+            else:
+                gstr = gate_label[0]
+            param = sp.symbols(f'{{{lbl.errorgen_type}}}^{{{pstr}}}_{{{gstr}}} ')
+            self.params.append(param)
+            self.label_map[param] = lbl
+
+    def __len__(self):
+        return len(self.params)
+
+    @property
+    def vec(self):
+        return list(self.params)
+
+    @property
+    def mat(self):
+        mat = np.zeros((4 ** self.num_qubits, 4 ** self.num_qubits), dtype='O')
+        for x in self.vec:
+            mat += x * self.bmat(x)
+        return sp.Matrix(mat)
+
+    @property
+    def basis(self):
+        """
+
+        :return:
+        """
+        return [egenlbl_to_mat(lbl, self.num_qubits) for lbl in self.labels]
+
+    @property
+    def dual_basis(self):
+        return [egenlbl_to_dual(lbl, self.num_qubits) for lbl in self.labels]
+
+    def bmat(self, param):
+        """
+        returns the basis matrix that corresponds to the param
+        """
+        return egenlbl_to_mat(self.label_map[param], self.num_qubits)
+
+    def dual_bmat(self, param):
+        return egenlbl_to_dual(self.label_map[param], self.num_qubits)
+
+    def extract_rates(self, matrix):
+        """
+        extracts the rates of the given matrices
+        """
+        rates = dict()
+        for lbl in tqdm(self.labels):
+            dgen = egenlbl_to_dual(lbl, self.num_qubits)
+            rates[lbl] = np.trace(dgen.conj().T @ matrix)
         return rates
 
 
